@@ -19,17 +19,6 @@ fn main() {
     // Run the lexer
     compiler.compile(&source);
 
-    let debug = args.len() > 2 && args[2] =="--debug";
-    if debug {
-        // Print all tokens for testing
-        println!("{:<5} {:<15} {:<20} {}", "Line", "TokenType", "Value", "---");
-        println!("{}", "-".repeat(55));
-        for tok in &compiler.tokens {
-            println!("{:<5} {:<15?} {:<20}", tok.line, tok.token_type, tok.value);
-        }
-        println!("{}", "-".repeat(55));
-        println!("Total tokens: {}", compiler.tokens.len());
-    }
 }
 
 
@@ -47,6 +36,31 @@ fn current_token(&self) -> String;
 /// Set the current token (typically used internally).
 fn set_current_token(&mut self, tok: String);
 }
+
+/// OPTION 1 - Trait for a recursive descent Syntax Analyzer
+/// over Vec<String>. Each function parses a nonterminal in
+/// the grammar. On error: exit immediately.
+pub trait SyntaxAnalyzer {
+fn parse_lolcode(&mut self);
+fn parse_head(&mut self);
+fn parse_title(&mut self);
+fn parse_comment(&mut self);
+fn parse_body(&mut self);
+fn parse_paragraph(&mut self);
+fn parse_inner_paragraph(&mut self);
+fn parse_inner_text(&mut self);
+fn parse_variable_define(&mut self);
+fn parse_variable_use(&mut self);
+fn parse_bold(&mut self);
+fn parse_italics(&mut self);
+fn parse_list(&mut self);
+fn parse_list_items(&mut self);
+fn parse_inner_list(&mut self);
+fn parse_link(&mut self);
+fn parse_newline(&mut self);
+fn parse_text(&mut self);
+}
+
 
 pub struct LOLCompiler {
     source: Vec<char>,
@@ -98,11 +112,28 @@ impl LOLCompiler {
         self.advance();
     }
 
+    // define a variable in the current scope
+    fn define_variable(&mut self, name: String, value: String) {
+        if let Some(scope) = self.scope_stack.last_mut() {
+            scope.insert(name, value);
+        }
+    }
+
+    fn resolve_variable(&self, name: &str) -> Option<&String> {
+        for scope in self.scope_stack.iter().rev() {
+            if let Some(val) = scope.get(name) {
+                return Some(val);
+            }
+        }
+        None
+    }
+
 }
 
 impl SyntaxAnalyzer for LOLCompiler { 
 
     fn parse_lolcode(&mut self) {
+        self.scope_stack.push(std::collections::HashMap::new()); //global scope
         self.expect(TokenType::Hai);
         // parse optional comment and head sections
         if self.peek().token_type == TokenType::Obtw {
@@ -115,9 +146,11 @@ impl SyntaxAnalyzer for LOLCompiler {
         self.parse_body();
         //file end must be Kbye
         self.expect(TokenType::Kbye);
+        self.scope_stack.pop(); // exit global scope
     }
 
     fn parse_comment(&mut self) {
+        self.scope_stack.push(std::collections::HashMap::new()); //comment scope
         self.expect(TokenType::Obtw);
         // consume all text until #TLDR
         while self.peek().token_type != TokenType::Tldr {
@@ -129,9 +162,11 @@ impl SyntaxAnalyzer for LOLCompiler {
             self.advance();
         }
         self.expect(TokenType::Tldr);
+        self.scope_stack.pop(); // exit comment scope
     }
 
     fn parse_head(&mut self) {
+        self.scope_stack.push(std::collections::HashMap::new()); //head scope
         self.expect(TokenType::Maek);
         self.expect(TokenType::Head);
         // optional comment
@@ -143,9 +178,11 @@ impl SyntaxAnalyzer for LOLCompiler {
             self.parse_title();
         }
         self.expect(TokenType::Mkay);
+        self.scope_stack.pop(); // exit head scope
     }
 
     fn parse_title(&mut self) {
+        self.scope_stack.push(std::collections::HashMap::new());
         self.expect(TokenType::Gimmeh);
         self.expect(TokenType::Title);
         // consume text until #OIC
@@ -158,9 +195,11 @@ impl SyntaxAnalyzer for LOLCompiler {
             self.advance();
         }
         self.expect(TokenType::Oic);
+        self.scope_stack.pop();
     }
 
     fn parse_body(&mut self) {
+        self.scope_stack.push(std::collections::HashMap::new()); //body scope
         while self.peek().token_type != TokenType::Kbye {
             if self.peek().token_type == TokenType::Eof {
                 eprintln!("Error: Expected #KBYE at line {}", self.peek().line);
@@ -188,9 +227,11 @@ impl SyntaxAnalyzer for LOLCompiler {
                 }
             }
         }
+        self.scope_stack.pop(); // exit body scope
     }
 
     fn parse_paragraph(&mut self) {
+        self.scope_stack.push(std::collections::HashMap::new()); //paragraph scope
         self.expect(TokenType::Maek);
         self.expect(TokenType::Paragraf);
         // optional variable definition must be first
@@ -200,9 +241,11 @@ impl SyntaxAnalyzer for LOLCompiler {
         // parse inner content until #MKAY
         self.parse_inner_paragraph();
         self.expect(TokenType::Mkay);
+        self.scope_stack.pop(); // exit paragraph scope
     }
 
     fn parse_inner_paragraph(&mut self) {
+        self.scope_stack.push(std::collections::HashMap::new());
         while self.peek().token_type != TokenType::Mkay {
             if self.peek().token_type == TokenType::Eof {
                 eprintln!("Error: Unclosed paragraph, expected #MKAY at line {}",
@@ -224,9 +267,11 @@ impl SyntaxAnalyzer for LOLCompiler {
                 }
             }
         }
+        self.scope_stack.pop(); // exit paragraph scope
     }
 
     fn parse_inner_text(&mut self) {
+        self.scope_stack.push(std::collections::HashMap::new()); // inner text scope
         self.expect(TokenType::Gimmeh);
         match self.peek().token_type {
             TokenType::Bold    => self.parse_bold(),
@@ -239,9 +284,11 @@ impl SyntaxAnalyzer for LOLCompiler {
                 std::process::exit(1);
             }
         }
+        self.scope_stack.pop(); // exit inner text scope
     }
 
     fn parse_bold(&mut self) {
+        self.scope_stack.push(std::collections::HashMap::new());
         self.expect(TokenType::Bold);
         // optional variable definition must be first
         if self.peek().token_type == TokenType::Ihaz {
@@ -265,9 +312,11 @@ impl SyntaxAnalyzer for LOLCompiler {
             }
         }
         self.expect(TokenType::Oic);
+        self.scope_stack.pop(); // exit bold scope
     }
 
     fn parse_italics(&mut self) {
+        self.scope_stack.push(std::collections::HashMap::new()); // italics scope
         self.expect(TokenType::Italics);
         // optional variable definition must be first
         if self.peek().token_type == TokenType::Ihaz {
@@ -291,9 +340,11 @@ impl SyntaxAnalyzer for LOLCompiler {
             }
         }
         self.expect(TokenType::Oic);
+        self.scope_stack.pop(); // exit italics scope
     }
 
     fn parse_list(&mut self) {
+        self.scope_stack.push(std::collections::HashMap::new()); // list scope
         self.expect(TokenType::Maek);
         self.expect(TokenType::List);
         // optional variable definition must be first
@@ -308,16 +359,20 @@ impl SyntaxAnalyzer for LOLCompiler {
         }
         self.parse_list_items();
         self.expect(TokenType::Mkay);
+        self.scope_stack.pop(); // exit list scope
     }
 
     fn parse_list_items(&mut self) {
+        self.scope_stack.push(std::collections::HashMap::new()); // list items scope
         // must have at least one item
         while self.peek().token_type == TokenType::Gimmeh {
             self.parse_inner_list();
         }
+        self.scope_stack.pop(); // exit list items scope
     }
 
     fn parse_inner_list(&mut self) {
+        self.scope_stack.push(std::collections::HashMap::new()); // list item scope
         self.expect(TokenType::Gimmeh);
         self.expect(TokenType::Item);
         // optional variable definition must be first
@@ -343,6 +398,7 @@ impl SyntaxAnalyzer for LOLCompiler {
             }
         }
         self.expect(TokenType::Oic);
+        self.scope_stack.pop(); // exit list item scope
     }
 
     fn parse_link(&mut self) {
@@ -373,6 +429,7 @@ impl SyntaxAnalyzer for LOLCompiler {
                 self.peek().line);
             std::process::exit(1);
         }
+        let name = self.tokens[self.pos].value.clone();
         self.advance(); // consume varname
         self.expect(TokenType::Itiz);
         // variable value must be a single word (Text token)
@@ -381,8 +438,11 @@ impl SyntaxAnalyzer for LOLCompiler {
                 self.peek().line);
             std::process::exit(1);
         }
+        let value = self.tokens[self.pos].value.clone();   
         self.advance(); // consume varvalue
         self.expect(TokenType::Mkay);
+        // store in scope
+        self.define_variable(name,value);
     }
 
     fn parse_variable_use(&mut self) {
@@ -393,8 +453,16 @@ impl SyntaxAnalyzer for LOLCompiler {
                 self.peek().line);
             std::process::exit(1);
         }
+        let name = self.tokens[self.pos].value.clone();
+        let line = self.tokens[self.pos].line;
         self.advance(); // consume varname
         self.expect(TokenType::Oic);
+
+        if self.resolve_variable(&name).is_none() {
+            eprintln!("Error: Variable '{}' used before definition at line {}",
+                name, line);
+            std::process::exit(1);
+        }
     }
 
 }
@@ -530,29 +598,6 @@ impl Compiler for LOLCompiler {
     }
 }
 
-/// OPTION 1 - Trait for a recursive descent Syntax Analyzer
-/// over Vec<String>. Each function parses a nonterminal in
-/// the grammar. On error: exit immediately.
-pub trait SyntaxAnalyzer {
-fn parse_lolcode(&mut self);
-fn parse_head(&mut self);
-fn parse_title(&mut self);
-fn parse_comment(&mut self);
-fn parse_body(&mut self);
-fn parse_paragraph(&mut self);
-fn parse_inner_paragraph(&mut self);
-fn parse_inner_text(&mut self);
-fn parse_variable_define(&mut self);
-fn parse_variable_use(&mut self);
-fn parse_bold(&mut self);
-fn parse_italics(&mut self);
-fn parse_list(&mut self);
-fn parse_list_items(&mut self);
-fn parse_inner_list(&mut self);
-fn parse_link(&mut self);
-fn parse_newline(&mut self);
-fn parse_text(&mut self);
-}
 
 /// Trait for a simple lexical analyzer.
 /// Implements a character-by-character analysis
