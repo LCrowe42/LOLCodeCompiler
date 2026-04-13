@@ -12,7 +12,7 @@
 	The meaning of #GIMMEH BOLD life #OIC is #LEMMESEE answer #OIC
 #MKAY
 
-#MAEK PARAGRAF No. The meaning of life is really #LEMME SEE myanswer #OIC #MKAY
+#MAEK PARAGRAF No. The meaning of life is really #LEMMESEE myanswer #OIC #MKAY
 
 #KBYE
 

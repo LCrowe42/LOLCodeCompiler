@@ -1,7 +1,7 @@
 // Project 1 LOLCODE 
 
 fn main() {
-     // Read the source file from command line argument
+    // Read the source file from command line argument
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!("Usage: {} <source_file>", args[0]);
@@ -19,14 +19,17 @@ fn main() {
     // Run the lexer
     compiler.compile(&source);
 
-    // Print all tokens for testing
-    println!("{:<5} {:<15} {:<20} {}", "Line", "TokenType", "Value", "---");
-    println!("{}", "-".repeat(55));
-    for tok in &compiler.tokens {
-        println!("{:<5} {:<15?} {:<20}", tok.line, tok.token_type, tok.value);
+    let debug = args.len() > 2 && args[2] =="--debug";
+    if debug {
+        // Print all tokens for testing
+        println!("{:<5} {:<15} {:<20} {}", "Line", "TokenType", "Value", "---");
+        println!("{}", "-".repeat(55));
+        for tok in &compiler.tokens {
+            println!("{:<5} {:<15?} {:<20}", tok.line, tok.token_type, tok.value);
+        }
+        println!("{}", "-".repeat(55));
+        println!("Total tokens: {}", compiler.tokens.len());
     }
-    println!("{}", "-".repeat(55));
-    println!("Total tokens: {}", compiler.tokens.len());
 }
 
 
@@ -73,6 +76,327 @@ impl LOLCompiler {
             scope_stack: Vec::new(),
         }
     }
+
+    fn peek(&self) -> &Token {
+        &self.tokens[self.pos]
+    }
+
+    fn advance(&mut self) -> &Token {
+        let tok = &self.tokens[self.pos];
+        self.pos += 1;
+        tok
+    }
+
+    fn expect(&mut self, expected: TokenType) {
+        if self.tokens[self.pos].token_type != expected {
+            eprintln!(
+                "Error: Expected token {:?} but found {:?} at line {}",
+                expected, self.tokens[self.pos].token_type, self.tokens[self.pos].line
+            );
+            std::process::exit(1);
+        }
+        self.advance();
+    }
+
+}
+
+impl SyntaxAnalyzer for LOLCompiler { 
+
+    fn parse_lolcode(&mut self) {
+        self.expect(TokenType::Hai);
+        // parse optional comment and head sections
+        if self.peek().token_type == TokenType::Obtw {
+            self.parse_comment();
+        }
+        if self.peek().token_type == TokenType::Maek {
+            self.parse_head();
+        }
+        // parse body
+        self.parse_body();
+        //file end must be Kbye
+        self.expect(TokenType::Kbye);
+    }
+
+    fn parse_comment(&mut self) {
+        self.expect(TokenType::Obtw);
+        // consume all text until #TLDR
+        while self.peek().token_type != TokenType::Tldr {
+            if self.peek().token_type == TokenType::Eof {
+                eprintln!("Error: Unclosed comment, expected #TLDR at line {}", 
+                    self.peek().line);
+                std::process::exit(1);
+            }
+            self.advance();
+        }
+        self.expect(TokenType::Tldr);
+    }
+
+    fn parse_head(&mut self) {
+        self.expect(TokenType::Maek);
+        self.expect(TokenType::Head);
+        // optional comment
+        if self.peek().token_type == TokenType::Obtw {
+            self.parse_comment();
+        }
+        // optional title
+        if self.peek().token_type == TokenType::Gimmeh {
+            self.parse_title();
+        }
+        self.expect(TokenType::Mkay);
+    }
+
+    fn parse_title(&mut self) {
+        self.expect(TokenType::Gimmeh);
+        self.expect(TokenType::Title);
+        // consume text until #OIC
+        while self.peek().token_type != TokenType::Oic {
+            if self.peek().token_type == TokenType::Eof {
+                eprintln!("Error: Unclosed title, expected #OIC at line {}",
+                    self.peek().line);
+                std::process::exit(1);
+            }
+            self.advance();
+        }
+        self.expect(TokenType::Oic);
+    }
+
+    fn parse_body(&mut self) {
+        while self.peek().token_type != TokenType::Kbye {
+            if self.peek().token_type == TokenType::Eof {
+                eprintln!("Error: Expected #KBYE at line {}", self.peek().line);
+                std::process::exit(1);
+            }
+            match self.peek().token_type {
+                TokenType::Obtw     => self.parse_comment(),
+                TokenType::Gimmeh   => self.parse_inner_text(),
+                TokenType::Ihaz     => self.parse_variable_define(),
+                TokenType::Lemmesee => self.parse_variable_use(),
+                TokenType::Newline  => self.parse_newline(),
+                TokenType::Text     => self.parse_text(),
+                TokenType::Maek => {
+                    // check paragraph or list
+                    if self.tokens[self.pos + 1].token_type == TokenType::Paragraf {
+                        self.parse_paragraph()
+                    } else {
+                        self.parse_list()
+                    }
+                },
+                _ => {
+                    eprintln!("Error: Unexpected token '{}' at line {}",
+                        self.peek().value, self.peek().line);
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+
+    fn parse_paragraph(&mut self) {
+        self.expect(TokenType::Maek);
+        self.expect(TokenType::Paragraf);
+        // optional variable definition must be first
+        if self.peek().token_type == TokenType::Ihaz {
+            self.parse_variable_define();
+        }
+        // parse inner content until #MKAY
+        self.parse_inner_paragraph();
+        self.expect(TokenType::Mkay);
+    }
+
+    fn parse_inner_paragraph(&mut self) {
+        while self.peek().token_type != TokenType::Mkay {
+            if self.peek().token_type == TokenType::Eof {
+                eprintln!("Error: Unclosed paragraph, expected #MKAY at line {}",
+                    self.peek().line);
+                std::process::exit(1);
+            }
+            match self.peek().token_type {
+                TokenType::Obtw     => self.parse_comment(),
+                TokenType::Gimmeh   => self.parse_inner_text(),
+                TokenType::Ihaz     => self.parse_variable_define(),
+                TokenType::Lemmesee => self.parse_variable_use(),
+                TokenType::Newline  => self.parse_newline(),
+                TokenType::Text     => self.parse_text(),
+                TokenType::Maek => self.parse_list(),
+                _ => {
+                    eprintln!("Error: Unexpected token '{}' inside paragraph at line {}",
+                        self.peek().value, self.peek().line);
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+
+    fn parse_inner_text(&mut self) {
+        self.expect(TokenType::Gimmeh);
+        match self.peek().token_type {
+            TokenType::Bold    => self.parse_bold(),
+            TokenType::Italics => self.parse_italics(),
+            TokenType::Linx    => self.parse_link(),
+            TokenType::Newline => self.parse_newline(),
+            _ => {
+                eprintln!("Error: Unexpected token '{}' after #GIMMEH at line {}",
+                    self.peek().value, self.peek().line);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    fn parse_bold(&mut self) {
+        self.expect(TokenType::Bold);
+        // optional variable definition must be first
+        if self.peek().token_type == TokenType::Ihaz {
+            self.parse_variable_define();
+        }
+        // consume content until #OIC
+        while self.peek().token_type != TokenType::Oic {
+            if self.peek().token_type == TokenType::Eof {
+                eprintln!("Error: Unclosed bold, expected #OIC at line {}",
+                    self.peek().line);
+                std::process::exit(1);
+            }
+            match self.peek().token_type {
+                TokenType::Text     => self.parse_text(),
+                TokenType::Lemmesee => self.parse_variable_use(),
+                _ => {
+                    eprintln!("Error: Unexpected token '{}' inside bold at line {}",
+                        self.peek().value, self.peek().line);
+                    std::process::exit(1);
+                }
+            }
+        }
+        self.expect(TokenType::Oic);
+    }
+
+    fn parse_italics(&mut self) {
+        self.expect(TokenType::Italics);
+        // optional variable definition must be first
+        if self.peek().token_type == TokenType::Ihaz {
+            self.parse_variable_define();
+        }
+        // consume content until #OIC
+        while self.peek().token_type != TokenType::Oic {
+            if self.peek().token_type == TokenType::Eof {
+                eprintln!("Error: Unclosed italics, expected #OIC at line {}",
+                    self.peek().line);
+                std::process::exit(1);
+            }
+            match self.peek().token_type {
+                TokenType::Text     => self.parse_text(),
+                TokenType::Lemmesee => self.parse_variable_use(),
+                _ => {
+                    eprintln!("Error: Unexpected token '{}' inside italics at line {}",
+                        self.peek().value, self.peek().line);
+                    std::process::exit(1);
+                }
+            }
+        }
+        self.expect(TokenType::Oic);
+    }
+
+    fn parse_list(&mut self) {
+        self.expect(TokenType::Maek);
+        self.expect(TokenType::List);
+        // optional variable definition must be first
+        if self.peek().token_type == TokenType::Ihaz {
+            self.parse_variable_define();
+        }
+        // must have at least one item
+        if self.peek().token_type != TokenType::Gimmeh {
+            eprintln!("Error: Expected #GIMMEH ITEM inside list at line {}",
+                self.peek().line);
+            std::process::exit(1);
+        }
+        self.parse_list_items();
+        self.expect(TokenType::Mkay);
+    }
+
+    fn parse_list_items(&mut self) {
+        // must have at least one item
+        while self.peek().token_type == TokenType::Gimmeh {
+            self.parse_inner_list();
+        }
+    }
+
+    fn parse_inner_list(&mut self) {
+        self.expect(TokenType::Gimmeh);
+        self.expect(TokenType::Item);
+        // optional variable definition must be first
+        if self.peek().token_type == TokenType::Ihaz {
+            self.parse_variable_define();
+        }
+        // consume content until #OIC
+        while self.peek().token_type != TokenType::Oic {
+            if self.peek().token_type == TokenType::Eof {
+                eprintln!("Error: Unclosed item, expected #OIC at line {}",
+                    self.peek().line);
+                std::process::exit(1);
+            }
+            match self.peek().token_type {
+                TokenType::Text     => self.parse_text(),
+                TokenType::Gimmeh   => self.parse_inner_text(),
+                TokenType::Lemmesee => self.parse_variable_use(),
+                _ => {
+                    eprintln!("Error: Unexpected token '{}' inside item at line {}",
+                        self.peek().value, self.peek().line);
+                    std::process::exit(1);
+                }
+            }
+        }
+        self.expect(TokenType::Oic);
+    }
+
+    fn parse_link(&mut self) {
+        self.expect(TokenType::Linx);
+        // expect an address (comes out as Text token from lexer)
+        if self.peek().token_type != TokenType::Text {
+            eprintln!("Error: Expected address after #GIMMEH LINX at line {}",
+                self.peek().line);
+            std::process::exit(1);
+        }
+        self.advance(); // consume the address
+        self.expect(TokenType::Oic);
+    }
+
+    fn parse_newline(&mut self) {
+        self.expect(TokenType::Newline);
+    }
+
+    fn parse_text(&mut self) {
+        self.expect(TokenType::Text);
+    }
+
+    fn parse_variable_define(&mut self) {
+        self.expect(TokenType::Ihaz);
+        // variable name must be a single word (Text token)
+        if self.peek().token_type != TokenType::Text {
+            eprintln!("Error: Expected variable name after #IHAZ at line {}",
+                self.peek().line);
+            std::process::exit(1);
+        }
+        self.advance(); // consume varname
+        self.expect(TokenType::Itiz);
+        // variable value must be a single word (Text token)
+        if self.peek().token_type != TokenType::Text {
+            eprintln!("Error: Expected variable value after #ITIZ at line {}",
+                self.peek().line);
+            std::process::exit(1);
+        }
+        self.advance(); // consume varvalue
+        self.expect(TokenType::Mkay);
+    }
+
+    fn parse_variable_use(&mut self) {
+        self.expect(TokenType::Lemmesee);
+        // variable name must be a single word (Text token)
+        if self.peek().token_type != TokenType::Text {
+            eprintln!("Error: Expected variable name after #LEMMESEE at line {}",
+                self.peek().line);
+            std::process::exit(1);
+        }
+        self.advance(); // consume varname
+        self.expect(TokenType::Oic);
+    }
+
 }
 
 impl Compiler for LOLCompiler {
@@ -189,6 +513,7 @@ impl Compiler for LOLCompiler {
             }
             self.tokens.push(tok);
         }
+        self.parse(); // start syntax analysis after lexing all tokens
     }
 
     fn current_token(&self) -> String {
@@ -200,7 +525,8 @@ impl Compiler for LOLCompiler {
     }
 
     fn parse(&mut self) {
-        todo!()
+        self.pos = 0;
+        self.parse_lolcode();
     }
 }
 
@@ -226,80 +552,6 @@ fn parse_inner_list(&mut self);
 fn parse_link(&mut self);
 fn parse_newline(&mut self);
 fn parse_text(&mut self);
-}
-
-impl SyntaxAnalyzer for LOLCompiler {
-    fn parse_lolcode(&mut self) {
-        
-    }
-
-    fn parse_head(&mut self) {
-        
-    }
-
-    fn parse_title(&mut self) {
-        
-    }
-
-    fn parse_comment(&mut self) {
-        
-    }
-
-    fn parse_body(&mut self) {
-        
-    }
-
-    fn parse_paragraph(&mut self) {
-        
-    }
-
-    fn parse_inner_paragraph(&mut self) {
-        
-    }
-
-    fn parse_inner_text(&mut self) {
-        
-    }
-
-    fn parse_variable_define(&mut self) {
-        
-    }
-
-    fn parse_variable_use(&mut self) {
-        
-    }
-
-    fn parse_bold(&mut self) {
-        
-    }
-
-    fn parse_italics(&mut self) {
-        
-    }
-
-    fn parse_list(&mut self) {
-        
-    }
-
-    fn parse_list_items(&mut self) {
-        
-    }
-
-    fn parse_inner_list(&mut self) {
-        
-    }
-
-    fn parse_link(&mut self) {
-        
-    }
-
-    fn parse_newline(&mut self) {
-        
-    }
-
-    fn parse_text(&mut self) {
-        
-    }
 }
 
 /// Trait for a simple lexical analyzer.
