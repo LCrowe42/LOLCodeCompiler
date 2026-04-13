@@ -1,44 +1,54 @@
 // Project 1 LOLCODE 
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() < 2 {
-        eprintln!("Usage: {} <source_file>", args[0]);
+    println!("Enter the name of the LOLCODE file to compile:");
+    
+    let mut filename = String::new();
+    std::io::stdin().read_line(&mut filename).unwrap_or_else(|e| {
+        eprintln!("Error reading input: {}", e);
+        std::process::exit(1);
+    });
+    
+    let filename = filename.trim();
+
+    if !filename.ends_with(".lol") {
+        eprintln!("Error: Input file must have a .lol extension");
+        pause();
         std::process::exit(1);
     }
 
-    let filename = &args[1];
     let source = std::fs::read_to_string(filename).unwrap_or_else(|e| {
         eprintln!("Error reading file '{}': {}", filename, e);
+        pause();
         std::process::exit(1);
     });
 
     let mut compiler = LOLCompiler::new(&source);
     compiler.compile(&source);
 
-    // write output file with same name but .html extension
     let output_filename = std::path::Path::new(filename)
         .with_extension("html");
     std::fs::write(&output_filename, &compiler.output).unwrap_or_else(|e| {
         eprintln!("Error writing output file: {}", e);
+        pause();
         std::process::exit(1);
     });
 
     println!("Compiled successfully to {}", output_filename.display());
 
-    // open in default browser
     #[cfg(target_os = "windows")]
     std::process::Command::new("cmd")
         .args(["/C", "start", output_filename.to_str().unwrap()])
         .spawn()
         .ok();
 
-    #[cfg(target_os = "macos")]
-    std::process::Command::new("open")
-        .arg(output_filename.to_str().unwrap())
-        .spawn()
-        .ok();
+    pause();
+}
 
+fn pause() {
+    println!("\nPress Enter to exit...");
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input).ok();
 }
 
 
