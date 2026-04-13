@@ -1,7 +1,6 @@
 // Project 1 LOLCODE 
 
 fn main() {
-    // Read the source file from command line argument
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!("Usage: {} <source_file>", args[0]);
@@ -15,9 +14,30 @@ fn main() {
     });
 
     let mut compiler = LOLCompiler::new(&source);
-
-    // Run the lexer
     compiler.compile(&source);
+
+    // write output file with same name but .html extension
+    let output_filename = std::path::Path::new(filename)
+        .with_extension("html");
+    std::fs::write(&output_filename, &compiler.output).unwrap_or_else(|e| {
+        eprintln!("Error writing output file: {}", e);
+        std::process::exit(1);
+    });
+
+    println!("Compiled successfully to {}", output_filename.display());
+
+    // open in default browser
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("cmd")
+        .args(["/C", "start", output_filename.to_str().unwrap()])
+        .spawn()
+        .ok();
+
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open")
+        .arg(output_filename.to_str().unwrap())
+        .spawn()
+        .ok();
 
 }
 
@@ -128,6 +148,10 @@ impl LOLCompiler {
         None
     }
 
+    fn emit(&mut self, s: &str) {
+        self.output.push_str(s);
+    }
+
 }
 
 impl SyntaxAnalyzer for LOLCompiler { 
@@ -135,6 +159,7 @@ impl SyntaxAnalyzer for LOLCompiler {
     fn parse_lolcode(&mut self) {
         self.scope_stack.push(std::collections::HashMap::new()); //global scope
         self.expect(TokenType::Hai);
+        self.emit("<html>\n");
         // parse optional comment and head sections
         if self.peek().token_type == TokenType::Obtw {
             self.parse_comment();
@@ -146,12 +171,14 @@ impl SyntaxAnalyzer for LOLCompiler {
         self.parse_body();
         //file end must be Kbye
         self.expect(TokenType::Kbye);
+        self.emit("<html>\n");
         self.scope_stack.pop(); // exit global scope
     }
 
     fn parse_comment(&mut self) {
         self.scope_stack.push(std::collections::HashMap::new()); //comment scope
         self.expect(TokenType::Obtw);
+        self.emit("<!-- ");
         // consume all text until #TLDR
         while self.peek().token_type != TokenType::Tldr {
             if self.peek().token_type == TokenType::Eof {
@@ -162,6 +189,7 @@ impl SyntaxAnalyzer for LOLCompiler {
             self.advance();
         }
         self.expect(TokenType::Tldr);
+        self.emit(" -->\n");
         self.scope_stack.pop(); // exit comment scope
     }
 
@@ -169,6 +197,7 @@ impl SyntaxAnalyzer for LOLCompiler {
         self.scope_stack.push(std::collections::HashMap::new()); //head scope
         self.expect(TokenType::Maek);
         self.expect(TokenType::Head);
+        self.emit("<head>\n");
         // optional comment
         if self.peek().token_type == TokenType::Obtw {
             self.parse_comment();
@@ -178,6 +207,7 @@ impl SyntaxAnalyzer for LOLCompiler {
             self.parse_title();
         }
         self.expect(TokenType::Mkay);
+        self.emit("</head>\n");
         self.scope_stack.pop(); // exit head scope
     }
 
@@ -185,6 +215,7 @@ impl SyntaxAnalyzer for LOLCompiler {
         self.scope_stack.push(std::collections::HashMap::new());
         self.expect(TokenType::Gimmeh);
         self.expect(TokenType::Title);
+        self.emit("<title>");
         // consume text until #OIC
         while self.peek().token_type != TokenType::Oic {
             if self.peek().token_type == TokenType::Eof {
@@ -195,6 +226,7 @@ impl SyntaxAnalyzer for LOLCompiler {
             self.advance();
         }
         self.expect(TokenType::Oic);
+        self.emit("</title>\n");
         self.scope_stack.pop();
     }
 
@@ -234,6 +266,7 @@ impl SyntaxAnalyzer for LOLCompiler {
         self.scope_stack.push(std::collections::HashMap::new()); //paragraph scope
         self.expect(TokenType::Maek);
         self.expect(TokenType::Paragraf);
+        self.emit("<p>");
         // optional variable definition must be first
         if self.peek().token_type == TokenType::Ihaz {
             self.parse_variable_define();
@@ -241,6 +274,7 @@ impl SyntaxAnalyzer for LOLCompiler {
         // parse inner content until #MKAY
         self.parse_inner_paragraph();
         self.expect(TokenType::Mkay);
+        self.emit("</p>\n");
         self.scope_stack.pop(); // exit paragraph scope
     }
 
@@ -290,6 +324,7 @@ impl SyntaxAnalyzer for LOLCompiler {
     fn parse_bold(&mut self) {
         self.scope_stack.push(std::collections::HashMap::new());
         self.expect(TokenType::Bold);
+        self.emit("<b>");
         // optional variable definition must be first
         if self.peek().token_type == TokenType::Ihaz {
             self.parse_variable_define();
@@ -312,12 +347,14 @@ impl SyntaxAnalyzer for LOLCompiler {
             }
         }
         self.expect(TokenType::Oic);
+        self.emit("</b>\n");
         self.scope_stack.pop(); // exit bold scope
     }
 
     fn parse_italics(&mut self) {
         self.scope_stack.push(std::collections::HashMap::new()); // italics scope
         self.expect(TokenType::Italics);
+        self.emit("<i>");
         // optional variable definition must be first
         if self.peek().token_type == TokenType::Ihaz {
             self.parse_variable_define();
@@ -340,6 +377,7 @@ impl SyntaxAnalyzer for LOLCompiler {
             }
         }
         self.expect(TokenType::Oic);
+        self.emit("</i>\n");
         self.scope_stack.pop(); // exit italics scope
     }
 
@@ -347,6 +385,7 @@ impl SyntaxAnalyzer for LOLCompiler {
         self.scope_stack.push(std::collections::HashMap::new()); // list scope
         self.expect(TokenType::Maek);
         self.expect(TokenType::List);
+        self.emit("<ul>\n");
         // optional variable definition must be first
         if self.peek().token_type == TokenType::Ihaz {
             self.parse_variable_define();
@@ -359,6 +398,7 @@ impl SyntaxAnalyzer for LOLCompiler {
         }
         self.parse_list_items();
         self.expect(TokenType::Mkay);
+        self.emit("</ul>\n");
         self.scope_stack.pop(); // exit list scope
     }
 
@@ -375,6 +415,7 @@ impl SyntaxAnalyzer for LOLCompiler {
         self.scope_stack.push(std::collections::HashMap::new()); // list item scope
         self.expect(TokenType::Gimmeh);
         self.expect(TokenType::Item);
+        self.emit("<li>");
         // optional variable definition must be first
         if self.peek().token_type == TokenType::Ihaz {
             self.parse_variable_define();
@@ -398,6 +439,7 @@ impl SyntaxAnalyzer for LOLCompiler {
             }
         }
         self.expect(TokenType::Oic);
+        self.emit("</li>\n");
         self.scope_stack.pop(); // exit list item scope
     }
 
@@ -409,16 +451,21 @@ impl SyntaxAnalyzer for LOLCompiler {
                 self.peek().line);
             std::process::exit(1);
         }
+        let address = self.tokens[self.pos].value.clone();
         self.advance(); // consume the address
         self.expect(TokenType::Oic);
+        self.emit(&format!("<a href=\"{}\"> {} </a>", address, address));
     }
 
     fn parse_newline(&mut self) {
         self.expect(TokenType::Newline);
+        self.emit("<br>\n");
     }
 
     fn parse_text(&mut self) {
+        let text =self.tokens[self.pos].value.clone();
         self.expect(TokenType::Text);
+        self.emit(&format!(" {}",text));
     }
 
     fn parse_variable_define(&mut self) {
@@ -458,10 +505,17 @@ impl SyntaxAnalyzer for LOLCompiler {
         self.advance(); // consume varname
         self.expect(TokenType::Oic);
 
-        if self.resolve_variable(&name).is_none() {
-            eprintln!("Error: Variable '{}' used before definition at line {}",
-                name, line);
-            std::process::exit(1);
+        // resolve and emit the variable value
+        match self.resolve_variable(&name) {
+            Some(value) => {
+                let value = value.clone();
+                self.emit(&format!(" {}", value));
+            },
+            None => {
+                eprintln!("Error: Variable '{}' used before definition at line {}",
+                    name, line);
+                std::process::exit(1);
+            }
         }
     }
 
