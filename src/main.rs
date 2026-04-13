@@ -111,16 +111,25 @@ impl LOLCompiler {
         }
     }
 
+    /**
+     * Peeks at the current token without advancing.
+     */
     fn peek(&self) -> &Token {
         &self.tokens[self.pos]
     }
 
+    /**
+     * Advances to the next token.
+     */
     fn advance(&mut self) -> &Token {
         let tok = &self.tokens[self.pos];
         self.pos += 1;
         tok
     }
 
+    /**
+     * Expects a specific token type and advances if it matches.
+     */
     fn expect(&mut self, expected: TokenType) {
         if self.tokens[self.pos].token_type != expected {
             eprintln!(
@@ -132,13 +141,17 @@ impl LOLCompiler {
         self.advance();
     }
 
-    // define a variable in the current scope
+    /**
+     * Defines a variable in the current scope.
+     */
     fn define_variable(&mut self, name: String, value: String) {
         if let Some(scope) = self.scope_stack.last_mut() {
             scope.insert(name, value);
         }
     }
-
+    /**
+     * Resolves a variable by its name, searching through scopes.
+     */
     fn resolve_variable(&self, name: &str) -> Option<&String> {
         for scope in self.scope_stack.iter().rev() {
             if let Some(val) = scope.get(name) {
@@ -148,6 +161,9 @@ impl LOLCompiler {
         None
     }
 
+    /**
+     * Appends a string to the output.
+     */
     fn emit(&mut self, s: &str) {
         self.output.push_str(s);
     }
@@ -156,6 +172,11 @@ impl LOLCompiler {
 
 impl SyntaxAnalyzer for LOLCompiler { 
 
+    /**
+     * Parses the main LOLCODE structure.
+     * Handles the global scope and overall structure of the document.
+     * Entry point for the syntax analysis after lexing all tokens.
+     */
     fn parse_lolcode(&mut self) {
         self.scope_stack.push(std::collections::HashMap::new()); //global scope
         self.expect(TokenType::Hai);
@@ -171,7 +192,7 @@ impl SyntaxAnalyzer for LOLCompiler {
         self.parse_body();
         //file end must be Kbye
         self.expect(TokenType::Kbye);
-        self.emit("<html>\n");
+        self.emit("\n</html>\n");
         self.scope_stack.pop(); // exit global scope
     }
 
@@ -186,6 +207,8 @@ impl SyntaxAnalyzer for LOLCompiler {
                     self.peek().line);
                 std::process::exit(1);
             }
+            let text = self.tokens[self.pos].value.clone();
+            self.emit(&format!(" {}", text));
             self.advance();
         }
         self.expect(TokenType::Tldr);
@@ -212,7 +235,7 @@ impl SyntaxAnalyzer for LOLCompiler {
     }
 
     fn parse_title(&mut self) {
-        self.scope_stack.push(std::collections::HashMap::new());
+        self.scope_stack.push(std::collections::HashMap::new()); // title scope
         self.expect(TokenType::Gimmeh);
         self.expect(TokenType::Title);
         self.emit("<title>");
@@ -223,11 +246,13 @@ impl SyntaxAnalyzer for LOLCompiler {
                     self.peek().line);
                 std::process::exit(1);
             }
+            let text = self.tokens[self.pos].value.clone();
+            self.emit(&format!(" {}", text));
             self.advance();
         }
         self.expect(TokenType::Oic);
-        self.emit("</title>\n");
-        self.scope_stack.pop();
+        self.emit(" </title>\n");
+        self.scope_stack.pop(); // exit title scope
     }
 
     fn parse_body(&mut self) {
